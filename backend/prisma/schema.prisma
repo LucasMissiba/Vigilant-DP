@@ -1,0 +1,251 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  DP_RH
+  GESTOR
+  COLABORADOR
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  RULE_CHANGE
+  CALCULATION
+  APPROVAL
+  REJECTION
+}
+
+enum BalanceStatus {
+  NORMAL
+  WARNING
+  CRITICAL
+  EXPIRED
+}
+
+enum CompensationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SCHEDULED
+  EXECUTED
+}
+
+model User {
+  id                String    @id @default(uuid())
+  email             String    @unique
+  password          String
+  name              String
+  role              UserRole
+  employeeId        String?   @unique
+  twoFactorEnabled  Boolean   @default(false)
+  twoFactorSecret   String?
+  isActive          Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relacionamentos
+  manager           User?     @relation("ManagerEmployee", fields: [managerId], references: [id])
+  managerId         String?
+  employees         User[]    @relation("ManagerEmployee")
+  
+  hourBalances      HourBalance[]
+  compensations     Compensation[]
+  auditLogs         AuditLog[]
+  notifications     Notification[]
+
+  @@index([email])
+  @@index([employeeId])
+  @@index([managerId])
+}
+
+model HourBalance {
+  id                String         @id @default(uuid())
+  userId            String
+  balance           Decimal        @db.Decimal(10, 2) // Saldo em horas (pode ser negativo)
+  status            BalanceStatus  @default(NORMAL)
+  validUntil        DateTime?      // Prazo de validade do saldo
+  lastCalculation   DateTime       @default(now())
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  movements         BalanceMovement[]
+  compensations     Compensation[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([validUntil])
+}
+
+model BalanceMovement {
+  id                String    @id @default(uuid())
+  hourBalanceId     String
+  type              String    // "ENTRY" (entrada) ou "EXIT" (saída)
+  hours             Decimal   @db.Decimal(10, 2)
+  description       String
+  referenceDate     DateTime
+  calculatedAt      DateTime  @default(now())
+  metadata          Json?     // Dados adicionais (regra aplicada, etc)
+  createdAt         DateTime  @default(now())
+
+  hourBalance       HourBalance @relation(fields: [hourBalanceId], references: [id], onDelete: Cascade)
+
+  @@index([hourBalanceId])
+  @@index([referenceDate])
+}
+
+model TimeClock {
+  id                String    @id @default(uuid())
+  userId            String
+  date              DateTime  @db.Date
+  entry1            DateTime?
+  exit1             DateTime?
+  entry2            DateTime?
+  exit2             DateTime?
+  entry3            DateTime?
+  exit3             DateTime?
+  totalHours        Decimal?  @db.Decimal(10, 2)
+  extraHours        Decimal?  @db.Decimal(10, 2)
+  nightHours        Decimal?  @db.Decimal(10, 2)
+  holidayHours      Decimal?  @db.Decimal(10, 2)
+  calculated        Boolean   @default(false)
+  calculatedAt      DateTime?
+  importedAt        DateTime  @default(now())
+  sourceFile        String?   // Nome do arquivo de origem
+  metadata          Json?     // Dados adicionais da importação
+
+  @@unique([userId, date])
+  @@index([userId])
+  @@index([date])
+  @@index([calculated])
+}
+
+model Compensation {
+  id                String              @id @default(uuid())
+  userId            String
+  hourBalanceId     String
+  requestedHours    Decimal             @db.Decimal(10, 2)
+  compensationDate  DateTime
+  status            CompensationStatus  @default(PENDING)
+  reason            String?
+  requestedBy       String              // ID do usuário que solicitou
+  approvedBy        String?             // ID do gestor/DP que aprovou
+  approvedAt        DateTime?
+  rejectionReason   String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hourBalance       HourBalance         @relation(fields: [hourBalanceId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([compensationDate])
+}
+
+model Rule {
+  id                String    @id @default(uuid())
+  name              String
+  code              String    @unique
+  description       String?
+  ruleType          String    // "CLT", "CCT", "CUSTOM"
+  config            Json      // Configuração da regra (Strategy Pattern)
+  isActive          Boolean   @default(true)
+  priority          Int       @default(0) // Prioridade de aplicação
+  validFrom         DateTime  @default(now())
+  validUntil        DateTime?
+  createdBy         String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([code])
+  @@index([isActive])
+  @@index([ruleType])
+}
+
+model Alert {
+  id                String    @id @default(uuid())
+  userId            String?
+  teamId            String?   // Para alertas de equipe
+  type              String    // "BALANCE_WARNING", "BALANCE_CRITICAL", "EXPIRATION", etc
+  title             String
+  message           String
+  severity          String    // "LOW", "MEDIUM", "HIGH", "CRITICAL"
+  read              Boolean   @default(false)
+  readAt            DateTime?
+  metadata          Json?
+  createdAt         DateTime  @default(now())
+
+  @@index([userId])
+  @@index([read])
+  @@index([severity])
+}
+
+model Notification {
+  id                String    @id @default(uuid())
+  userId            String
+  type              String
+  title             String
+  message           String
+  read              Boolean   @default(false)
+  readAt            DateTime?
+  metadata          Json?
+  createdAt         DateTime  @default(now())
+
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([read])
+}
+
+model AuditLog {
+  id                String      @id @default(uuid())
+  userId            String?
+  action            AuditAction
+  entityType        String      // Tipo da entidade afetada
+  entityId          String?     // ID da entidade
+  description       String
+  changes           Json?       // Mudanças realizadas (before/after)
+  ipAddress         String?
+  userAgent         String?
+  createdAt         DateTime    @default(now())
+
+  user              User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([entityType])
+  @@index([createdAt])
+}
+
+model PayrollExport {
+  id                String    @id @default(uuid())
+  period            String    // "YYYY-MM"
+  fileName          String
+  filePath          String
+  recordCount       Int
+  totalExtraHours   Decimal   @db.Decimal(10, 2)
+  exportedBy        String
+  exportedAt        DateTime  @default(now())
+  validated         Boolean   @default(false)
+  validatedAt       DateTime?
+  validatedBy       String?
+
+  @@index([period])
+  @@index([exportedAt])
+}
+
