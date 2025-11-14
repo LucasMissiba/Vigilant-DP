@@ -87,7 +87,13 @@ export class DashboardService {
     const allImports = await this.prisma.timeClock.findMany({
       where: { sourceFile: { not: null } },
       orderBy: { importedAt: 'desc' },
-      include: { user: { select: { name: true, employeeId: true } } },
+      select: {
+        id: true,
+        userId: true,
+        sourceFile: true,
+        importedAt: true,
+        date: true,
+      },
     });
     
     // Agrupa por arquivo e pega o mais recente de cada

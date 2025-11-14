@@ -70,6 +70,7 @@ export interface ExtraHoursResult {
   holidayHours: number;
   dsrHours?: number;
   appliedRules: string[];
+  metadata?: any; // Dados adicionais da importação
   breakdown: {
     date: Date;
     regularHours: number;
